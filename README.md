@@ -36,9 +36,10 @@ Still work in progress
     * Provide plugin management.
     * Provide socket for plugin and API communication.
     * Load config file.
+    * Checkpoint support.
     * Do not need to understand the detailed schema of each interface.
     * Do not need to verify whether plugin is doing its works.
-    * Checkpoint support.
+    * Do not maintain cache.
 
 * `libztl` -- API for communication to daemon
 

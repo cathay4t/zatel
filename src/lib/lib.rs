@@ -17,6 +17,6 @@ mod ipc;
 
 pub use error::ZatelError;
 pub use ipc::{
-    ipc_bind, ipc_connect, ipc_exec, ipc_recv, ipc_send, ZatelIpcCmd,
-    ZatelIpcData, ZatelIpcMessage,
+    ipc_bind, ipc_connect, ipc_exec, ipc_recv, ipc_recv_safe, ipc_send,
+    ZatelIpcCmd, ZatelIpcData, ZatelIpcMessage,
 };

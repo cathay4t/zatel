@@ -23,6 +23,7 @@ use tokio::net::{UnixListener, UnixStream};
 use crate::ZatelError;
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/zatel_socket";
+const IPC_SAFE_SIZE: usize = 1024 * 10; // 10 KiB
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum ZatelIpcCmd {
@@ -94,16 +95,13 @@ pub async fn ipc_send(
     Ok(())
 }
 
-pub async fn ipc_recv(
+async fn ipc_recv_get_size(
     stream: &mut UnixStream,
-) -> Result<ZatelIpcMessage, ZatelError> {
-    let message_size = match stream.read_u32().await {
+) -> Result<usize, ZatelError> {
+    match stream.read_u32().await {
         Err(e) => {
             if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                return Ok(ZatelIpcMessage {
-                    cmd: ZatelIpcCmd::ConnectionClosed,
-                    data: ZatelIpcData::None,
-                });
+                return Ok(0); // connection closed.
             } else {
                 // TODO: Handle the client closed the connection.
                 return Err(ZatelError::bug(format!(
@@ -112,15 +110,28 @@ pub async fn ipc_recv(
                 )));
             }
         }
-        Ok(s) => s as usize,
-    };
+        Ok(s) => Ok(s as usize),
+    }
+}
+
+async fn ipc_recv_get_data(
+    stream: &mut UnixStream,
+    message_size: usize,
+) -> Result<ZatelIpcMessage, ZatelError> {
     let mut buffer = vec![0u8; message_size];
 
     if let Err(e) = stream.read_exact(&mut buffer).await {
-        return Err(ZatelError::bug(format!(
-            "Failed to read message to buffer with size {}: {}",
-            message_size, e
-        )));
+        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+            return Ok(ZatelIpcMessage {
+                cmd: ZatelIpcCmd::ConnectionClosed,
+                data: ZatelIpcData::None,
+            });
+        } else {
+            return Err(ZatelError::bug(format!(
+                "Failed to read message to buffer with size {}: {}",
+                message_size, e
+            )));
+        }
     }
     match serde_yaml::from_slice::<ZatelIpcMessage>(&buffer) {
         Err(e) => Err(ZatelError::bug(format!(
@@ -132,6 +143,40 @@ pub async fn ipc_recv(
             _ => Ok(m),
         },
     }
+}
+
+pub async fn ipc_recv(
+    stream: &mut UnixStream,
+) -> Result<ZatelIpcMessage, ZatelError> {
+    let message_size = ipc_recv_get_size(stream).await?;
+    if message_size == 0 {
+        return Ok(ZatelIpcMessage {
+            cmd: ZatelIpcCmd::ConnectionClosed,
+            data: ZatelIpcData::None,
+        });
+    }
+    ipc_recv_get_data(stream, message_size).await
+}
+
+// Return error if data size execeed IPC_SAFE_SIZE
+// Normally used by daemon where client/plugin can not be trusted.
+pub async fn ipc_recv_safe(
+    stream: &mut UnixStream,
+) -> Result<ZatelIpcMessage, ZatelError> {
+    let message_size = ipc_recv_get_size(stream).await?;
+    if message_size == 0 {
+        return Ok(ZatelIpcMessage {
+            cmd: ZatelIpcCmd::ConnectionClosed,
+            data: ZatelIpcData::None,
+        });
+    }
+    if message_size > IPC_SAFE_SIZE {
+        return Err(ZatelError::invalid_argument(format!(
+            "Invalid IPC message: message size execeed the limit({})",
+            IPC_SAFE_SIZE
+        )));
+    }
+    ipc_recv_get_data(stream, message_size).await
 }
 
 pub async fn ipc_exec(

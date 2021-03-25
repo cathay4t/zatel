@@ -14,7 +14,7 @@
 
 use tokio::{self, io::AsyncWriteExt, net::UnixStream, task};
 
-use zatel::{ipc_bind, ipc_recv, ipc_send, ZatelIpcCmd, ZatelIpcMessage};
+use zatel::{ipc_bind, ipc_recv_safe, ipc_send, ZatelIpcCmd, ZatelIpcMessage};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 50)]
 async fn main() {
@@ -47,11 +47,10 @@ async fn shutdown_connection(stream: &mut UnixStream) {
 }
 
 // TODO: Implement on:
-//  * memory size limit, client cannot ask for big memory size.
 //  * timeout
 async fn handle_client(mut stream: UnixStream) {
     loop {
-        match ipc_recv(&mut stream).await {
+        match ipc_recv_safe(&mut stream).await {
             Ok(ZatelIpcMessage { cmd, data }) => {
                 if cmd == ZatelIpcCmd::ConnectionClosed {
                     shutdown_connection(&mut stream).await;
