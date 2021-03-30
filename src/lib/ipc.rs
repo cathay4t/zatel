@@ -16,50 +16,83 @@ use std::fs::remove_file;
 
 use serde::{Deserialize, Serialize};
 use serde_yaml;
-use tokio::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 
-use crate::ZatelError;
+use crate::{ZatelError, ZatelLogEntry, ZatelPluginInfo};
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/zatel_socket";
-const IPC_SAFE_SIZE: usize = 1024 * 10; // 10 KiB
+const IPC_SAFE_SIZE: usize = 1024 * 1024 * 10; // 10 MiB
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum ZatelIpcCmd {
-    Query(String),
-    ConnectionClosed,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum ZatelIpcData {
     Error(ZatelError),
-    String(String),
+    QueryIfaceInfo(String),
+    QueryIfaceInfoReply(String),
+    QueryIfaceRunningConf(String),
+    QueryIfaceSavedConf(String),
+    ApplyIfaceConf(String),
+    ConnectionClosed,
     None,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ZatelIpcMessage {
-    pub cmd: ZatelIpcCmd,
-    pub data: ZatelIpcData, // TODO: include logs also
+    pub data: ZatelIpcData,
+    // TODO: include logs also
+    pub log: Option<Vec<ZatelLogEntry>>,
+}
+
+impl ZatelIpcMessage {
+    pub fn new(data: ZatelIpcData) -> Self {
+        ZatelIpcMessage {
+            data: data,
+            log: None,
+        }
+    }
+    pub fn new_with_log(data: ZatelIpcData, log: Vec<ZatelLogEntry>) -> Self {
+        ZatelIpcMessage {
+            data: data,
+            log: Some(log),
+        }
+    }
+
+    pub fn from_result(result: Result<Self, ZatelError>) -> Self {
+        match result {
+            Ok(i) => i,
+            Err(e) => ZatelIpcMessage::new(ZatelIpcData::Error(e)),
+        }
+    }
 }
 
 pub fn ipc_bind() -> Result<UnixListener, ZatelError> {
-    remove_file(DEFAULT_SOCKET_PATH).ok();
-    match UnixListener::bind(DEFAULT_SOCKET_PATH) {
+    ipc_bind_with_path(DEFAULT_SOCKET_PATH)
+}
+
+pub fn ipc_bind_with_path(
+    socket_path: &str,
+) -> Result<UnixListener, ZatelError> {
+    remove_file(socket_path).ok();
+    match UnixListener::bind(socket_path) {
         Err(e) => Err(ZatelError::bug(format!(
             "Failed to bind socket {}: {}",
-            DEFAULT_SOCKET_PATH, e
+            socket_path, e
         ))),
         Ok(l) => Ok(l),
     }
 }
 
 pub async fn ipc_connect() -> Result<UnixStream, ZatelError> {
-    match UnixStream::connect(DEFAULT_SOCKET_PATH).await {
+    ipc_connect_with_path(DEFAULT_SOCKET_PATH).await
+}
+
+pub async fn ipc_connect_with_path(
+    socket_path: &str,
+) -> Result<UnixStream, ZatelError> {
+    match UnixStream::connect(socket_path).await {
         Err(e) => Err(ZatelError::bug(format!(
             "Failed to connect socket {}: {}",
-            DEFAULT_SOCKET_PATH, e
+            socket_path, e
         ))),
         Ok(l) => Ok(l),
     }
@@ -122,10 +155,7 @@ async fn ipc_recv_get_data(
 
     if let Err(e) = stream.read_exact(&mut buffer).await {
         if e.kind() == std::io::ErrorKind::UnexpectedEof {
-            return Ok(ZatelIpcMessage {
-                cmd: ZatelIpcCmd::ConnectionClosed,
-                data: ZatelIpcData::None,
-            });
+            return Ok(ZatelIpcMessage::new(ZatelIpcData::ConnectionClosed));
         } else {
             return Err(ZatelError::bug(format!(
                 "Failed to read message to buffer with size {}: {}",
@@ -150,25 +180,19 @@ pub async fn ipc_recv(
 ) -> Result<ZatelIpcMessage, ZatelError> {
     let message_size = ipc_recv_get_size(stream).await?;
     if message_size == 0 {
-        return Ok(ZatelIpcMessage {
-            cmd: ZatelIpcCmd::ConnectionClosed,
-            data: ZatelIpcData::None,
-        });
+        return Ok(ZatelIpcMessage::new(ZatelIpcData::ConnectionClosed));
     }
     ipc_recv_get_data(stream, message_size).await
 }
 
 // Return error if data size execeed IPC_SAFE_SIZE
-// Normally used by daemon where client/plugin can not be trusted.
+// Normally used by daemon where client can not be trusted.
 pub async fn ipc_recv_safe(
     stream: &mut UnixStream,
 ) -> Result<ZatelIpcMessage, ZatelError> {
     let message_size = ipc_recv_get_size(stream).await?;
     if message_size == 0 {
-        return Ok(ZatelIpcMessage {
-            cmd: ZatelIpcCmd::ConnectionClosed,
-            data: ZatelIpcData::None,
-        });
+        return Ok(ZatelIpcMessage::new(ZatelIpcData::ConnectionClosed));
     }
     if message_size > IPC_SAFE_SIZE {
         return Err(ZatelError::invalid_argument(format!(

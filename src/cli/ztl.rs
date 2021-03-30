@@ -12,33 +12,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use zatel::{
-    ipc_connect, ipc_exec, ZatelIpcCmd, ZatelIpcData, ZatelIpcMessage,
-};
+use clap::{App, Arg, SubCommand, AppSettings};
+use zatel::{ipc_connect, ipc_exec, ZatelIpcData, ZatelIpcMessage};
 
 #[tokio::main]
 async fn main() {
+    let matches = App::new("ztl")
+        .version("1.0")
+        .author("Gris Ge <fge@redhat.com>")
+        .about("CLI to Zatel daemon")
+        .setting(AppSettings::ArgRequiredElseHelp)
+        .subcommand(
+            SubCommand::with_name("query")
+                .about("Query interface information")
+                .arg(
+                    Arg::with_name("iface_name")
+                        .index(1)
+                        .help("print debug information verbosely"),
+                ),
+        )
+        .get_matches();
+
+    // You can handle information about subcommands by requesting their matches by name
+    // (as below), requesting just the name used, or both at the same time
+    if let Some(matches) = matches.subcommand_matches("query") {
+        handle_query(matches.value_of("iface_name").unwrap()).await;
+    }
+}
+
+async fn handle_query(iface_name: &str) {
     let mut connection = ipc_connect().await.unwrap();
-    println!(
-        "{:?}",
-        ipc_exec(
-            &mut connection,
-            &ZatelIpcMessage {
-                cmd: ZatelIpcCmd::Query("eth1".into()),
-                data: ZatelIpcData::None,
-            }
-        )
-        .await
-    );
-    println!(
-        "{:?}",
-        ipc_exec(
-            &mut connection,
-            &ZatelIpcMessage {
-                cmd: ZatelIpcCmd::Query("eth1".into()),
-                data: ZatelIpcData::None,
-            }
-        )
-        .await
-    );
+    match ipc_exec(
+        &mut connection,
+        &ZatelIpcMessage::new(ZatelIpcData::QueryIfaceInfo(
+            iface_name.to_string(),
+        )),
+    ).await {
+        Ok(ZatelIpcMessage {
+            data: ZatelIpcData::QueryIfaceInfoReply(s),
+            log: _,
+        }) => println!("{}", s),
+        Ok(i) => eprintln!("Unknown reply: {:?}", i),
+        Err(e) => eprintln!("{}", e),
+    }
 }

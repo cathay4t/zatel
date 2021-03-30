@@ -1,22 +1,22 @@
 [package]
-name = "zateld"
+name = "zatel_plugin_nispor"
 version = "1.0.1"
 authors = ["Gris Ge <fge@redhat.com>"]
 license = "Apache-2.0"
 edition = "2018"
-description = "Network Manager"
+description = "Nispor Plugin of Zatel Daemon"
 homepage = "https://github.com/cathay4t/zatel"
 repository = "https://github.com/cathay4t/zatel"
 keywords = ["network"]
 categories = ["network-programming", "os"]
 
 [[bin]]
-name = "zateld"
-path = "zateld.rs"
+name = "zatel_plugin_nispor"
+path = "plugin_nispor.rs"
 
 [dependencies]
 serde = "1.0"
 zatel = {path = "../lib"}
 tokio = { version = "1.3", features = ["rt", "net", "io-util"]}
-futures = "0.3"
+nispor = "1.0"
 serde_yaml = "0.8"

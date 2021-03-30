@@ -12,15 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod error;
-mod ipc;
-mod plugin;
-mod logging;
+use serde::{Deserialize, Serialize};
 
-pub use crate::error::ZatelError;
-pub use crate::ipc::{
-    ipc_bind, ipc_bind_with_path, ipc_connect, ipc_connect_with_path, ipc_exec,
-    ipc_recv, ipc_recv_safe, ipc_send, ZatelIpcData, ZatelIpcMessage,
+use crate::{
+    ipc_connect_with_path, ipc_recv, ipc_send, ZatelError, ZatelIpcData,
+    ZatelIpcMessage,
 };
-pub use crate::logging::{ZatelLogEntry, ZatelLogLevel};
-pub use crate::plugin::{ipc_plugin_exec, ZatelPluginInfo};
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ZatelPluginInfo {
+    pub name: String,
+    pub socket_path: String,
+}
+
+pub async fn ipc_plugin_exec(
+    plugin_info: &ZatelPluginInfo,
+    ipc_msg: &ZatelIpcMessage,
+) -> Result<ZatelIpcMessage, ZatelError> {
+    let mut stream = ipc_connect_with_path(&plugin_info.socket_path).await?;
+    ipc_send(&mut stream, ipc_msg).await?;
+    // TODO: Handle timeout
+    ipc_recv(&mut stream).await
+}

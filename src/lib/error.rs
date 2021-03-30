@@ -17,11 +17,12 @@
 
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
     InvalidArgument,
     ZatelBug,
+    PluginError,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -30,22 +31,28 @@ impl std::fmt::Display for ErrorKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ZatelError {
     pub kind: ErrorKind,
     pub msg: String,
 }
 
 impl ZatelError {
-    pub(crate) fn bug(message: String) -> ZatelError {
+    pub fn bug(message: String) -> ZatelError {
         ZatelError {
             kind: ErrorKind::ZatelBug,
             msg: message,
         }
     }
-    pub(crate) fn invalid_argument(message: String) -> ZatelError {
+    pub fn invalid_argument(message: String) -> ZatelError {
         ZatelError {
             kind: ErrorKind::InvalidArgument,
+            msg: message,
+        }
+    }
+    pub fn plugin_error(message: String) -> ZatelError {
+        ZatelError {
+            kind: ErrorKind::PluginError,
             msg: message,
         }
     }

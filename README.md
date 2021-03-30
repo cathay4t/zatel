@@ -7,6 +7,20 @@ Still work in progress
 * Easy for user to configure the network to fit their complex needs.
 * Easy for developer to contribute.
 
+## HOWTO
+
+### Daemon
+
+```sh
+cargo build; cargo run --bin zateld
+```
+
+### CLI
+
+```sh
+cargo run --bin ztl query eth1
+```
+
 ## Design
 * Nispor providing __full__ network status of kernel for all interfaces
   or single interface.
@@ -54,5 +68,11 @@ Still work in progress
 
 ## TODO
 
+* Tests
+    * IPC request big size at daemon
+    * 1000+ concurrent IPC requests to daemon, daemon should queue them
+      instead of allocate big CPU/memeory to finish them concurrently.
+    * IPC timeout
 * Daemon for unix socket commands
 * Plugin interface
+* Handle concurrency on changing state.
