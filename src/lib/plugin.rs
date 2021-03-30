@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ipc_connect_with_path, ipc_recv, ipc_send, ZatelError, ZatelIpcData,
+    ipc_connect_with_path, ipc_recv, ipc_send, ZatelError,
     ZatelIpcMessage,
 };
 

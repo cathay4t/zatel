@@ -106,7 +106,7 @@ async fn handle_query(
     stream: &mut UnixStream,
     filter: &str,
     plugins: &[ZatelPluginInfo],
-) -> Result<(), ZatelError> {
+) {
     eprintln!("DEBUG: handle_query {}", filter);
     let ipc_msg =
         ZatelIpcMessage::new(ZatelIpcData::QueryIfaceInfo(filter.into()));
@@ -127,13 +127,26 @@ async fn handle_query(
             iface_strs.push(s);
         }
     }
-    ipc_send(
-        stream,
-        &ZatelIpcMessage::new(ZatelIpcData::QueryIfaceInfoReply(
-            merge_iface_strs(&iface_strs)?,
-        )),
-    )
-    .await
+    if let Err(e) = match merge_iface_strs(&iface_strs) {
+        Ok(s) => {
+            ipc_send(
+                stream,
+                &ZatelIpcMessage::new(ZatelIpcData::QueryIfaceInfoReply(s)),
+            )
+            .await
+        }
+        Err(e) => {
+            ipc_send(
+                stream,
+                &ZatelIpcMessage::new(ZatelIpcData::Error(
+                    ZatelError::plugin_error(format!("{}", e)),
+                )),
+            )
+            .await
+        }
+    } {
+        eprintln!("ERROR: Failed to send IPC message: {}", e);
+    }
 }
 
 fn merge_iface_strs(yml_strs: &[String]) -> Result<String, ZatelError> {

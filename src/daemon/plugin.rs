@@ -14,8 +14,6 @@
 
 use std::os::unix::fs::PermissionsExt;
 
-use tokio::{io::AsyncWriteExt, net::UnixStream};
-
 use zatel::{ZatelError, ZatelPluginInfo};
 
 const PLUGIN_PREFIX: &str = "zatel_plugin_";

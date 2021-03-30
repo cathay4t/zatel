@@ -19,7 +19,7 @@ use serde_yaml;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 
-use crate::{ZatelError, ZatelLogEntry, ZatelPluginInfo};
+use crate::{ZatelError, ZatelLogEntry};
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/zatel_socket";
 const IPC_SAFE_SIZE: usize = 1024 * 1024 * 10; // 10 MiB

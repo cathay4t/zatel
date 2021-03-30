@@ -18,8 +18,6 @@ use zatel::{ipc_connect, ipc_exec, ZatelIpcData, ZatelIpcMessage};
 #[tokio::main]
 async fn main() {
     let matches = App::new("ztl")
-        .version("1.0")
-        .author("Gris Ge <fge@redhat.com>")
         .about("CLI to Zatel daemon")
         .setting(AppSettings::ArgRequiredElseHelp)
         .subcommand(

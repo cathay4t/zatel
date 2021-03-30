@@ -18,10 +18,9 @@ use serde::{Deserialize, Serialize};
 use serde_yaml;
 use tokio::{self, io::AsyncWriteExt, net::UnixStream};
 use zatel::{
-    ipc_bind_with_path, ipc_connect, ipc_recv, ipc_send, ZatelError,
+    ipc_bind_with_path, ipc_recv, ipc_send, ZatelError,
     ZatelIpcData, ZatelIpcMessage,
 };
-
 
 const PLUGIN_NAME: &str = "foo";
 
@@ -91,7 +90,7 @@ async fn handle_client(mut stream: UnixStream) {
                     break;
                 }
                 _ => {
-                    let message = handle_msg(&mut stream, ipc_msg.data).await;
+                    let message = handle_msg(ipc_msg.data).await;
                     if let Err(e) = ipc_send(&mut stream, &message).await {
                         eprintln!(
                             "{}: failed to send to daemon : {}",
@@ -109,10 +108,7 @@ async fn handle_client(mut stream: UnixStream) {
     }
 }
 
-async fn handle_msg(
-    stream: &mut UnixStream,
-    data: ZatelIpcData,
-) -> ZatelIpcMessage {
+async fn handle_msg(data: ZatelIpcData) -> ZatelIpcMessage {
     eprintln!("DEBUG: {}: Got request: {:?}", PLUGIN_NAME, data);
     match data {
         ZatelIpcData::QueryIfaceInfo(iface_name) => {

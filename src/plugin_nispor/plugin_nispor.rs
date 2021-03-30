@@ -20,8 +20,8 @@ use nispor::NetState;
 use serde_yaml;
 use tokio::{self, io::AsyncWriteExt, net::UnixStream};
 use zatel::{
-    ipc_bind_with_path, ipc_connect, ipc_recv, ipc_send, ZatelError,
-    ZatelIpcData, ZatelIpcMessage,
+    ipc_bind_with_path, ipc_recv, ipc_send, ZatelError, ZatelIpcData,
+    ZatelIpcMessage,
 };
 
 use crate::iface::ZatelBaseIface;
@@ -81,7 +81,7 @@ async fn handle_client(mut stream: UnixStream) {
                     break;
                 }
                 _ => {
-                    let message = handle_msg(&mut stream, ipc_msg.data).await;
+                    let message = handle_msg(ipc_msg.data).await;
                     if let Err(e) = ipc_send(&mut stream, &message).await {
                         eprintln!(
                             "{}: failed to send to daemon : {}",
@@ -102,10 +102,7 @@ async fn handle_client(mut stream: UnixStream) {
 // TODO: The lib zatel should provide function call `plugin_start` taking
 //       below function pointer as argument. But it is complex to passing
 //       async function to a thread.
-async fn handle_msg(
-    stream: &mut UnixStream,
-    data: ZatelIpcData,
-) -> ZatelIpcMessage {
+async fn handle_msg(data: ZatelIpcData) -> ZatelIpcMessage {
     eprintln!("DEBUG: {}: Got request: {:?}", PLUGIN_NAME, data);
     match data {
         ZatelIpcData::QueryIfaceInfo(iface_name) => {
