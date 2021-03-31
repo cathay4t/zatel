@@ -12,40 +12,90 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use clap::{App, Arg, SubCommand, AppSettings};
+use std::io::Read;
+
+use clap::{App, Arg, ArgMatches, SubCommand};
 use zatel::{ipc_connect, ipc_exec, ZatelIpcData, ZatelIpcMessage};
 
 #[tokio::main]
 async fn main() {
     let matches = App::new("ztl")
         .about("CLI to Zatel daemon")
-        .setting(AppSettings::ArgRequiredElseHelp)
         .subcommand(
             SubCommand::with_name("query")
                 .about("Query interface information")
+                .alias("q")
+                .alias("qu")
+                .alias("que")
+                .alias("quer")
                 .arg(
                     Arg::with_name("iface_name")
                         .index(1)
+                        .required(true)
                         .help("print debug information verbosely"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("connection")
+                .about("network connections")
+                .alias("c")
+                .alias("co")
+                .alias("con")
+                .alias("conn")
+                .alias("connect")
+                .alias("connecti")
+                .alias("connectio")
+                .subcommand(
+                    SubCommand::with_name("show")
+                        .about("Show saved network connections")
+                        .alias("s")
+                        .alias("sh")
+                        .alias("sho")
+                        .arg(
+                            Arg::with_name("conn_id")
+                                .index(1)
+                                .multiple(true)
+                                .help("show specific connections only"),
+                        ),
+                )
+                .subcommand(
+                    SubCommand::with_name("import")
+                        .about("Import a new connection from file")
+                        .alias("i")
+                        .alias("im")
+                        .alias("imp")
+                        .alias("impo")
+                        .alias("impor")
+                        .arg(
+                            Arg::with_name("file_path")
+                                .index(1)
+                                .required(true)
+                                .help("YAML file for connection to add"),
+                        ),
                 ),
         )
         .get_matches();
 
-    // You can handle information about subcommands by requesting their matches by name
-    // (as below), requesting just the name used, or both at the same time
     if let Some(matches) = matches.subcommand_matches("query") {
-        handle_query(matches.value_of("iface_name").unwrap()).await;
+        handle_query(&matches).await;
+    } else if let Some(matches) = matches.subcommand_matches("connection") {
+        handle_connection(&matches).await;
+    } else {
+        eprintln!("TODO: show all network state in brief summery");
     }
 }
 
-async fn handle_query(iface_name: &str) {
+async fn handle_query(matches: &ArgMatches<'_>) {
+    let iface_name = matches.value_of("iface_name").unwrap();
     let mut connection = ipc_connect().await.unwrap();
     match ipc_exec(
         &mut connection,
         &ZatelIpcMessage::new(ZatelIpcData::QueryIfaceInfo(
             iface_name.to_string(),
         )),
-    ).await {
+    )
+    .await
+    {
         Ok(ZatelIpcMessage {
             data: ZatelIpcData::QueryIfaceInfoReply(s),
             log: _,
@@ -53,4 +103,36 @@ async fn handle_query(iface_name: &str) {
         Ok(i) => eprintln!("Unknown reply: {:?}", i),
         Err(e) => eprintln!("{}", e),
     }
+}
+
+async fn handle_connection(matches: &ArgMatches<'_>) {
+    if let Some(matches) = matches.subcommand_matches("show") {
+        eprintln!("TODO: support query specific connection, {:?}", matches);
+    } else if let Some(matches) = matches.subcommand_matches("import") {
+        handle_connection_import(matches.value_of("file_path").unwrap()).await;
+    } else {
+        eprintln!("TODO: support query all connection");
+    }
+}
+
+async fn handle_connection_import(file_path: &str) {
+    let content = read_file(file_path);
+    let mut connection = ipc_connect().await.unwrap();
+    match ipc_exec(
+        &mut connection,
+        &ZatelIpcMessage::new(ZatelIpcData::SaveConf("".into(), content)),
+    )
+    .await
+    {
+        Ok(r) => println!("Connection {} created", r.get_data_str().unwrap()),
+        Err(e) => eprintln!("{}", e),
+    }
+}
+
+fn read_file(file_path: &str) -> String {
+    let mut fd = std::fs::File::open(file_path).expect("Failed to open file");
+    let mut contents = String::new();
+    fd.read_to_string(&mut contents)
+        .expect("Failed to read file");
+    contents
 }

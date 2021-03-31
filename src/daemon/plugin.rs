@@ -14,16 +14,23 @@
 
 use std::os::unix::fs::PermissionsExt;
 
-use zatel::{ZatelError, ZatelPluginInfo};
+use tokio::net::UnixStream;
+use zatel::{
+    ipc_connect_with_path, ipc_exec, ZatelError, ZatelIpcData, ZatelIpcMessage,
+    ZatelPluginInfo,
+};
 
 const PLUGIN_PREFIX: &str = "zatel_plugin_";
 const PLUGIN_SOCKET_PREFIX: &str = "/tmp/zatel_plugin_";
+
+const PLUGIN_CONNECT_REPLY_COUNT: usize = 10;
+const PLUGIN_CONNECT_REPLY_INTERVAL: u64 = 100; // 100ms
 
 // Each plugin will be invoked in a thread with a socket path string as its
 // first argument. The plugin should listen on that socket and wait command
 // from plugin.
 //
-pub(crate) fn load_plugins() -> Vec<ZatelPluginInfo> {
+pub(crate) async fn load_plugins() -> Vec<ZatelPluginInfo> {
     eprintln!("DEBUG: Loading plugins");
     let mut plugins = Vec::new();
     let search_folder = match std::env::var("ZATEL_PLUGIN_FOLDER") {
@@ -66,10 +73,22 @@ pub(crate) fn load_plugins() -> Vec<ZatelPluginInfo> {
                             }
                         };
                     println!("DEBUG: Found plugin {}", &plugin_exec_path);
-                    match plugin_start(&plugin_exec_path, &plugin_name) {
-                        Ok(plugin) => plugins.push(plugin),
+                    match plugin_start(&plugin_exec_path, &plugin_name).await {
+                        Ok(plugin) => {
+                            eprintln!(
+                                "DEBUG: Plugin {} started at {} with \
+                                capacities: {:?}",
+                                &plugin.name,
+                                &plugin.socket_path,
+                                &plugin.capacities
+                            );
+                            plugins.push(plugin);
+                        }
                         Err(e) => {
-                            eprintln!("{}", e);
+                            eprintln!(
+                                "ERROR: Failed to start plugin {}: {}",
+                                &plugin_exec_path, e
+                            );
                             continue;
                         }
                     }
@@ -83,7 +102,7 @@ pub(crate) fn load_plugins() -> Vec<ZatelPluginInfo> {
     plugins
 }
 
-fn plugin_start(
+async fn plugin_start(
     plugin_exec_path: &str,
     plugin_name: &str,
 ) -> Result<ZatelPluginInfo, ZatelError> {
@@ -99,10 +118,7 @@ fn plugin_start(
                 plugin_exec_path, &socket_path
             );
 
-            Ok(ZatelPluginInfo {
-                name: plugin_name.into(),
-                socket_path: socket_path.into(),
-            })
+            query_plugin_info(&socket_path).await
         }
         Err(e) => Err(ZatelError::plugin_error(format!(
             "Failed to start plugin {} {}: {}",
@@ -128,4 +144,61 @@ fn get_current_exec_folder() -> String {
     }
 
     "/usr/bin".into()
+}
+
+async fn query_plugin_info(
+    socket_path: &str,
+) -> Result<ZatelPluginInfo, ZatelError> {
+    // Plugin might not ready yet right after started, so retry is required.
+    let mut stream = ipc_connect_with_retry(socket_path).await?;
+    let ipc_msg = ipc_exec(
+        &mut stream,
+        &ZatelIpcMessage::new(ZatelIpcData::QueryPluginInfo),
+    )
+    .await?;
+
+    if let ZatelIpcMessage {
+        data: ZatelIpcData::QueryPluginInfoReply(mut plugin_info),
+        log: _,
+    } = ipc_msg
+    {
+        plugin_info.socket_path = socket_path.into();
+        Ok(plugin_info)
+    } else {
+        Err(ZatelError::plugin_error(format!(
+            "Invalid plugin reply on QueryPluginInfo: {:?}",
+            ipc_msg
+        )))
+    }
+}
+
+async fn ipc_connect_with_retry(
+    socket_path: &str,
+) -> Result<UnixStream, ZatelError> {
+    for i in 0..PLUGIN_CONNECT_REPLY_COUNT {
+        std::thread::sleep(std::time::Duration::from_millis(
+            PLUGIN_CONNECT_REPLY_INTERVAL,
+        ));
+        match ipc_connect_with_path(socket_path).await {
+            Err(e) => {
+                if i == PLUGIN_CONNECT_REPLY_COUNT - 1 {
+                    return Err(ZatelError::plugin_error(format!(
+                        "Failed to connect plugin IPC socket {}: {}",
+                        socket_path, e
+                    )));
+                } else {
+                    eprintln!(
+                        "DEBUG: Failed to connect plugin \
+                        socket_path: {}: {}, retrying",
+                        socket_path, e
+                    );
+                    continue;
+                }
+            }
+            Ok(s) => return Ok(s),
+        }
+    }
+    Err(ZatelError::bug(
+        "This should never happen in ipc_connect_with_retry".into(),
+    ))
 }

@@ -15,7 +15,6 @@
 use std::env::args;
 
 use serde::{Deserialize, Serialize};
-use serde_yaml;
 use tokio::{self, io::AsyncWriteExt, net::UnixStream};
 use zatel::{
     ipc_bind_with_path, ipc_recv, ipc_send, ZatelError, ZatelIpcData,
@@ -23,19 +22,7 @@ use zatel::{
 };
 
 const PLUGIN_NAME: &str = "foo";
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-struct FooInfo {
-    opt1: String,
-    opt2: u32,
-    opt3: Vec<u8>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-struct FooIface {
-    name: String,
-    foo: FooInfo,
-}
+const CONF_FOLDER: &str = "/tmp/zatel";
 
 #[tokio::main()]
 async fn main() {
@@ -44,6 +31,14 @@ async fn main() {
     if argv.len() != 2 {
         eprintln!(
             "Invalid argument, should be single argument: <plugin_socket_path>"
+        );
+        std::process::exit(1);
+    }
+
+    if let Err(e) = create_conf_dir() {
+        eprintln!(
+            "Failed to create folder for saving configurations {}: {}",
+            CONF_FOLDER, e
         );
         std::process::exit(1);
     }
@@ -112,49 +107,34 @@ async fn handle_client(mut stream: UnixStream) {
 async fn handle_msg(data: ZatelIpcData) -> ZatelIpcMessage {
     eprintln!("DEBUG: {}: Got request: {:?}", PLUGIN_NAME, data);
     match data {
-        ZatelIpcData::QueryIfaceInfo(iface_name) => {
-            ZatelIpcMessage::from_result(query_iface(&iface_name))
-        }
         ZatelIpcData::QueryPluginInfo => ZatelIpcMessage::new(
             ZatelIpcData::QueryPluginInfoReply(ZatelPluginInfo::new(
                 PLUGIN_NAME,
-                vec![ZatelPluginCapacity::Query, ZatelPluginCapacity::Apply],
+                vec![ZatelPluginCapacity::Config],
             )),
         ),
-        ZatelIpcData::ValidateConf(conf) => {
-            ZatelIpcMessage::from_result(validate_conf(&conf))
+        ZatelIpcData::SaveConf(uuid, conf) => {
+            ZatelIpcMessage::from_result(save_conf(&uuid, &conf))
         }
         _ => ZatelIpcMessage::new(ZatelIpcData::None),
     }
 }
 
-fn query_iface(iface_name: &str) -> Result<ZatelIpcMessage, ZatelError> {
-    let iface = FooIface {
-        name: iface_name.to_string(),
-        foo: FooInfo {
-            opt1: "opt1_value".into(),
-            opt2: 8u32,
-            opt3: vec![1, 2, 8],
-        },
-    };
-    match serde_yaml::to_string(&iface) {
-        Ok(s) => Ok(ZatelIpcMessage::new(ZatelIpcData::QueryIfaceInfoReply(s))),
-        Err(e) => Err(ZatelError::plugin_error(format!(
-            "Failed to convert ZatelIfaceInfo to yml: {}",
-            e
-        ))),
-    }
+fn save_conf(uuid: &str, conf: &str) -> Result<ZatelIpcMessage, ZatelError> {
+    Ok(ZatelIpcMessage::new(ZatelIpcData::SaveConfReply(
+        uuid.to_string(),
+    )))
 }
 
-fn validate_conf(conf: &str) -> Result<ZatelIpcMessage, ZatelError> {
-    if let Ok(foo_iface) = serde_yaml::from_str::<FooIface>(conf) {
-        if let Ok(s) = serde_yaml::to_string(&foo_iface) {
-            return Ok(ZatelIpcMessage::new(ZatelIpcData::ValidateConfReply(
-                s,
+fn create_conf_dir() -> Result<(), ZatelError> {
+    if !std::path::Path::new(CONF_FOLDER).is_dir() {
+        std::fs::remove_file(CONF_FOLDER).ok();
+        if let Err(e) = std::fs::create_dir(CONF_FOLDER) {
+            return Err(ZatelError::plugin_error(format!(
+                "Failed to create folder {}: {}",
+                CONF_FOLDER, e
             )));
         }
     }
-    Ok(ZatelIpcMessage::new(ZatelIpcData::ValidateConfReply(
-        "".into(),
-    )))
+    Ok(())
 }

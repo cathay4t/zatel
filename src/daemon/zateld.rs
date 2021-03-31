@@ -14,13 +14,12 @@
 
 mod plugin;
 
-use futures::future::join_all;
-
 use serde_yaml;
 use tokio::{self, io::AsyncWriteExt, net::UnixStream, task};
+use uuid::Uuid;
 use zatel::{
-    ipc_bind, ipc_plugin_exec, ipc_recv_safe, ipc_send, ZatelError,
-    ZatelIpcData, ZatelIpcMessage, ZatelPluginInfo,
+    ipc_bind, ipc_plugins_exec, ipc_recv_safe, ipc_send, ZatelError,
+    ZatelIpcData, ZatelIpcMessage, ZatelPluginCapacity, ZatelPluginInfo,
 };
 
 use crate::plugin::load_plugins;
@@ -38,7 +37,7 @@ async fn main() {
     // We don't plan to unload plugin during runtime when plugin is slow or bad.
     // To support that, we need a mutex protected Vec which is complex.
     // We assume the plugin is trustable.
-    let plugins = load_plugins();
+    let plugins = load_plugins().await;
 
     loop {
         match listener.accept().await {
@@ -76,6 +75,9 @@ async fn handle_client(mut stream: UnixStream, plugins: &[ZatelPluginInfo]) {
                 ZatelIpcData::QueryIfaceInfo(filter) => {
                     handle_query(&mut stream, &filter, plugins).await;
                 }
+                ZatelIpcData::SaveConf(uuid, conf) => {
+                    handle_save_conf(&mut stream, &uuid, &conf, plugins).await;
+                }
                 _ => {
                     println!("got unknown IPC message: {:?}", &ipc_msg);
                     if let Err(e) = ipc_send(
@@ -110,46 +112,132 @@ async fn handle_query(
     eprintln!("DEBUG: handle_query {}", filter);
     let ipc_msg =
         ZatelIpcMessage::new(ZatelIpcData::QueryIfaceInfo(filter.into()));
-    let mut replys_async = Vec::new();
-    for plugin_info in plugins {
-        replys_async.push(ipc_plugin_exec(plugin_info, &ipc_msg));
-    }
-    let replys = join_all(replys_async).await;
 
-    let mut iface_strs = Vec::new();
-    for reply in replys {
-        eprintln!("DEBUG: Got reply from plugin: {:?}", &reply);
-        if let Ok(ZatelIpcMessage {
-            data: ZatelIpcData::QueryIfaceInfoReply(s),
-            log: _,
-        }) = reply
-        {
-            iface_strs.push(s);
-        }
-    }
-    if let Err(e) = match merge_iface_strs(&iface_strs) {
-        Ok(s) => {
-            ipc_send(
-                stream,
-                &ZatelIpcMessage::new(ZatelIpcData::QueryIfaceInfoReply(s)),
-            )
-            .await
-        }
+    let reply_msg = match merge_yaml_mapping_strs(
+        &ipc_plugins_exec(&ipc_msg, plugins, &ZatelPluginCapacity::Query).await,
+    ) {
+        Ok(s) => ZatelIpcMessage::new(ZatelIpcData::QueryIfaceInfoReply(s)),
         Err(e) => {
-            ipc_send(
-                stream,
-                &ZatelIpcMessage::new(ZatelIpcData::Error(
-                    ZatelError::plugin_error(format!("{}", e)),
-                )),
-            )
-            .await
+            if let Err(e) =
+                ipc_send(stream, &ZatelIpcMessage::new(ZatelIpcData::Error(e)))
+                    .await
+            {
+                eprintln!("ERROR: {}", e);
+            }
+            return;
         }
-    } {
+    };
+
+    if let Err(e) = ipc_send(stream, &reply_msg).await {
         eprintln!("ERROR: Failed to send IPC message: {}", e);
     }
 }
 
-fn merge_iface_strs(yml_strs: &[String]) -> Result<String, ZatelError> {
+// Steps:
+//  1. Send conf string to plugin to validate. Raise error if existing plugins
+//     cannot achieve full desire config.
+//  2. Send conf string to plugin to save.
+//
+async fn handle_save_conf(
+    stream: &mut UnixStream,
+    uuid: &str,
+    conf: &str,
+    plugins: &[ZatelPluginInfo],
+) {
+    eprintln!("DEBUG: handle_save_conf {}", conf);
+
+    if let Err(e) = validate_conf(conf, plugins).await {
+        if let Err(e) =
+            ipc_send(stream, &ZatelIpcMessage::new(ZatelIpcData::Error(e)))
+                .await
+        {
+            eprintln!("WARN: {}", e);
+        }
+        return;
+    }
+
+    // Gen UUID for this config
+    let uuid = if uuid == "" {
+        format!(
+            "{}",
+            Uuid::new_v4()
+                .to_hyphenated()
+                .encode_lower(&mut Uuid::encode_buffer())
+        )
+    } else {
+        uuid.to_string()
+    };
+
+    let ipc_msg = ZatelIpcMessage::new(ZatelIpcData::SaveConf(
+        uuid.clone(),
+        conf.to_string(),
+    ));
+
+    let reply_data =
+        if ipc_plugins_exec(&ipc_msg, plugins, &ZatelPluginCapacity::Config)
+            .await
+            .len()
+            == 0
+        {
+            ZatelIpcData::Error(ZatelError::plugin_error(format!(
+                "No plugin has saved desired config"
+            )))
+        } else {
+            ZatelIpcData::SaveConfReply(uuid)
+        };
+
+    if let Err(e) = ipc_send(stream, &ZatelIpcMessage::new(reply_data)).await {
+        eprintln!("ERROR: Failed to send IPC message: {}", e);
+    }
+}
+
+// Each plugin could only cover a portion of the configure, but they should
+// sum up to the full desire config, or else return ZatelError
+async fn validate_conf(
+    conf: &str,
+    plugins: &[ZatelPluginInfo],
+) -> Result<(), ZatelError> {
+    eprintln!("DEBUG: validate_conf {}", conf);
+    let ipc_msg =
+        ZatelIpcMessage::new(ZatelIpcData::ValidateConf(conf.to_string()));
+
+    let desire_yaml_mapping: serde_yaml::Value =
+        match serde_yaml::from_str(conf) {
+            Ok(i) => i,
+            Err(e) => {
+                return Err(ZatelError::invalid_argument(format!(
+                    "Invalid format of YAML: {}",
+                    e
+                )));
+            }
+        };
+
+    let reply_strs =
+        ipc_plugins_exec(&ipc_msg, plugins, &ZatelPluginCapacity::Apply).await;
+    let merged_reply = merge_yaml_mapping_strs(&reply_strs)?;
+    let validated_yaml_mapping: serde_yaml::Value =
+        match serde_yaml::from_str(&merged_reply) {
+            Ok(i) => i,
+            Err(e) => {
+                return Err(ZatelError::bug(format!(
+                    "This should never happen: {}",
+                    e
+                )));
+            }
+        };
+
+    if validated_yaml_mapping != desire_yaml_mapping {
+        // TODO: provide fancy difference to user via error.
+        Err(ZatelError::invalid_argument(format!(
+            "Invalid config, validated: {}, desired: {}",
+            &merged_reply, conf
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn merge_yaml_mapping_strs(yml_strs: &[String]) -> Result<String, ZatelError> {
     let mut full_obj = serde_yaml::Mapping::new();
 
     for yml_str in yml_strs {

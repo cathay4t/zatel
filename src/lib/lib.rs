@@ -14,8 +14,8 @@
 
 mod error;
 mod ipc;
-mod plugin;
 mod logging;
+mod plugin;
 
 pub use crate::error::ZatelError;
 pub use crate::ipc::{
@@ -23,4 +23,6 @@ pub use crate::ipc::{
     ipc_recv, ipc_recv_safe, ipc_send, ZatelIpcData, ZatelIpcMessage,
 };
 pub use crate::logging::{ZatelLogEntry, ZatelLogLevel};
-pub use crate::plugin::{ipc_plugin_exec, ZatelPluginInfo};
+pub use crate::plugin::{
+    ipc_plugin_exec, ipc_plugins_exec, ZatelPluginCapacity, ZatelPluginInfo,
+};

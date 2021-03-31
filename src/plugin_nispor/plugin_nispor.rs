@@ -21,7 +21,7 @@ use serde_yaml;
 use tokio::{self, io::AsyncWriteExt, net::UnixStream};
 use zatel::{
     ipc_bind_with_path, ipc_recv, ipc_send, ZatelError, ZatelIpcData,
-    ZatelIpcMessage,
+    ZatelIpcMessage, ZatelPluginCapacity, ZatelPluginInfo,
 };
 
 use crate::iface::ZatelBaseIface;
@@ -82,6 +82,7 @@ async fn handle_client(mut stream: UnixStream) {
                 }
                 _ => {
                     let message = handle_msg(ipc_msg.data).await;
+                    eprintln!("DEBUG: {}: reply: {:?}", PLUGIN_NAME, &message);
                     if let Err(e) = ipc_send(&mut stream, &message).await {
                         eprintln!(
                             "{}: failed to send to daemon : {}",
@@ -108,7 +109,22 @@ async fn handle_msg(data: ZatelIpcData) -> ZatelIpcMessage {
         ZatelIpcData::QueryIfaceInfo(iface_name) => {
             ZatelIpcMessage::from_result(query_iface(&iface_name))
         }
-        _ => ZatelIpcMessage::new(ZatelIpcData::None),
+        ZatelIpcData::QueryPluginInfo => ZatelIpcMessage::new(
+            ZatelIpcData::QueryPluginInfoReply(ZatelPluginInfo::new(
+                PLUGIN_NAME,
+                vec![ZatelPluginCapacity::Query, ZatelPluginCapacity::Apply],
+            )),
+        ),
+        ZatelIpcData::ValidateConf(conf) => {
+            ZatelIpcMessage::from_result(validate_conf(&conf))
+        }
+        _ => {
+            eprintln!(
+                "WARN: {}: Got unknown request: {:?}",
+                PLUGIN_NAME, &data
+            );
+            ZatelIpcMessage::new(ZatelIpcData::None)
+        }
     }
 }
 
@@ -140,4 +156,17 @@ fn query_iface(iface_name: &str) -> Result<ZatelIpcMessage, ZatelError> {
             iface_name
         ))),
     }
+}
+
+fn validate_conf(conf: &str) -> Result<ZatelIpcMessage, ZatelError> {
+    if let Ok(zatel_iface) = serde_yaml::from_str::<ZatelBaseIface>(conf) {
+        if let Ok(s) = serde_yaml::to_string(&zatel_iface) {
+            return Ok(ZatelIpcMessage::new(ZatelIpcData::ValidateConfReply(
+                s,
+            )));
+        }
+    }
+    Ok(ZatelIpcMessage::new(ZatelIpcData::ValidateConfReply(
+        "".into(),
+    )))
 }

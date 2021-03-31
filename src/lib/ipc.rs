@@ -19,7 +19,7 @@ use serde_yaml;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 
-use crate::{ZatelError, ZatelLogEntry};
+use crate::{ZatelError, ZatelLogEntry, ZatelPluginInfo};
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/zatel_socket";
 const IPC_SAFE_SIZE: usize = 1024 * 1024 * 10; // 10 MiB
@@ -27,11 +27,18 @@ const IPC_SAFE_SIZE: usize = 1024 * 1024 * 10; // 10 MiB
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum ZatelIpcData {
     Error(ZatelError),
+    QueryPluginInfo,
+    QueryPluginInfoReply(ZatelPluginInfo),
     QueryIfaceInfo(String),
     QueryIfaceInfoReply(String),
-    QueryIfaceRunningConf(String),
-    QueryIfaceSavedConf(String),
-    ApplyIfaceConf(String),
+    // Plugin with ZatelPluginCapacity::Apply capacity should support
+    // ValidateConf and only reply with the supported portion of desire config.
+    ValidateConf(String),
+    ValidateConfReply(String),
+    // Plugin with ZatelPluginCapacity::Config capacity should support
+    // SaveConf and reply with the UUID saved.
+    SaveConf(String, String),
+    SaveConfReply(String),
     ConnectionClosed,
     None,
 }
@@ -61,6 +68,20 @@ impl ZatelIpcMessage {
         match result {
             Ok(i) => i,
             Err(e) => ZatelIpcMessage::new(ZatelIpcData::Error(e)),
+        }
+    }
+
+    pub fn get_data_str<'a>(&'a self) -> Result<&'a str, ZatelError> {
+        match &self.data {
+            ZatelIpcData::QueryIfaceInfo(s) => Ok(&s),
+            ZatelIpcData::QueryIfaceInfoReply(s) => Ok(&s),
+            ZatelIpcData::ValidateConf(s) => Ok(&s),
+            ZatelIpcData::ValidateConfReply(s) => Ok(&s),
+            ZatelIpcData::SaveConfReply(s) => Ok(&s),
+            _ => Err(ZatelError::invalid_argument(format!(
+                "{:?} does not holding string in data",
+                &self.data
+            ))),
         }
     }
 }
