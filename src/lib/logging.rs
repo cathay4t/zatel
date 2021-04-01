@@ -26,5 +26,5 @@ pub enum ZatelLogLevel {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct ZatelLogEntry {
     pub level: ZatelLogLevel,
-    pub message: String
+    pub message: String,
 }

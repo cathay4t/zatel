@@ -19,7 +19,7 @@ use serde_yaml;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 
-use crate::{ZatelError, ZatelLogEntry, ZatelPluginInfo};
+use crate::{ZatelConnection, ZatelError, ZatelLogEntry, ZatelPluginInfo};
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/zatel_socket";
 const IPC_SAFE_SIZE: usize = 1024 * 1024 * 10; // 10 MiB
@@ -37,8 +37,12 @@ pub enum ZatelIpcData {
     ValidateConfReply(String),
     // Plugin with ZatelPluginCapacity::Config capacity should support
     // SaveConf and reply with the UUID saved.
-    SaveConf(String, String),
-    SaveConfReply(String),
+    SaveConf(ZatelConnection),
+    SaveConfReply(ZatelConnection),
+    QuerySavedConf(String),
+    QuerySavedConfReply(ZatelConnection),
+    QuerySavedConfAll,
+    QuerySavedConfAllReply(Vec<ZatelConnection>),
     ConnectionClosed,
     None,
 }
@@ -77,7 +81,6 @@ impl ZatelIpcMessage {
             ZatelIpcData::QueryIfaceInfoReply(s) => Ok(&s),
             ZatelIpcData::ValidateConf(s) => Ok(&s),
             ZatelIpcData::ValidateConfReply(s) => Ok(&s),
-            ZatelIpcData::SaveConfReply(s) => Ok(&s),
             _ => Err(ZatelError::invalid_argument(format!(
                 "{:?} does not holding string in data",
                 &self.data

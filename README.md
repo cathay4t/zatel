@@ -76,3 +76,8 @@ cargo run --bin ztl query eth1
 * Daemon for unix socket commands
 * Plugin interface
 * Handle concurrency on changing state.
+* ABI Backwards compatibility:
+    * set default value if unknown when serialize and deserialize
+    * Use function of struct/enum instead of itself.
+* Split `lib/zatel` to `lib/zatel` and `lib/zatel_plugin`.
+

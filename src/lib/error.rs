@@ -15,7 +15,7 @@
 // Try not implement From for ZatelError here unless you are sure this
 // error should always convert to certain type of ErrorKind.
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

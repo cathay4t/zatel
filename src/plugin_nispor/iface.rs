@@ -111,9 +111,7 @@ fn time_str_to_u32(time: &str) -> Option<u32> {
         _ => {
             if time.len() > "sec".len() {
                 match time[..time.len() - "sec".len()].parse::<u32>() {
-                    Ok(i) => {
-                        Some(i)
-                    }
+                    Ok(i) => Some(i),
                     Err(e) => {
                         eprintln!(
                             "ERROR: invalid time string: {}: {}",

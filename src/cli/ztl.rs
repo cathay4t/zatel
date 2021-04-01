@@ -15,7 +15,9 @@
 use std::io::Read;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
-use zatel::{ipc_connect, ipc_exec, ZatelIpcData, ZatelIpcMessage};
+use zatel::{
+    ipc_connect, ipc_exec, ZatelConnection, ZatelIpcData, ZatelIpcMessage,
+};
 
 #[tokio::main]
 async fn main() {
@@ -54,7 +56,8 @@ async fn main() {
                         .arg(
                             Arg::with_name("conn_id")
                                 .index(1)
-                                .multiple(true)
+                                .required(true)
+                                //TODO: .multiple(true)
                                 .help("show specific connections only"),
                         ),
                 )
@@ -107,24 +110,33 @@ async fn handle_query(matches: &ArgMatches<'_>) {
 
 async fn handle_connection(matches: &ArgMatches<'_>) {
     if let Some(matches) = matches.subcommand_matches("show") {
-        eprintln!("TODO: support query specific connection, {:?}", matches);
+        handle_connection_show(matches.value_of("conn_id").unwrap()).await;
     } else if let Some(matches) = matches.subcommand_matches("import") {
         handle_connection_import(matches.value_of("file_path").unwrap()).await;
     } else {
-        eprintln!("TODO: support query all connection");
+        handle_connection_show_all().await;
     }
 }
 
 async fn handle_connection_import(file_path: &str) {
     let content = read_file(file_path);
     let mut connection = ipc_connect().await.unwrap();
+    let ztl_con = ZatelConnection::new(content);
     match ipc_exec(
         &mut connection,
-        &ZatelIpcMessage::new(ZatelIpcData::SaveConf("".into(), content)),
+        &ZatelIpcMessage::new(ZatelIpcData::SaveConf(ztl_con)),
     )
     .await
     {
-        Ok(r) => println!("Connection {} created", r.get_data_str().unwrap()),
+        Ok(r) => {
+            if let ZatelIpcData::SaveConfReply(new_ztl_con) = &r.data {
+                println!("Connection saved:");
+                print_connection(&new_ztl_con);
+                println!("");
+            } else {
+                eprintln!("Unexpected reply {:?}", r);
+            }
+        }
         Err(e) => eprintln!("{}", e),
     }
 }
@@ -135,4 +147,57 @@ fn read_file(file_path: &str) -> String {
     fd.read_to_string(&mut contents)
         .expect("Failed to read file");
     contents
+}
+
+async fn handle_connection_show_all() {
+    let mut connection = ipc_connect().await.unwrap();
+    match ipc_exec(
+        &mut connection,
+        &ZatelIpcMessage::new(ZatelIpcData::QuerySavedConfAll),
+    )
+    .await
+    {
+        Ok(r) => {
+            if let ZatelIpcData::QuerySavedConfAllReply(ztl_cons) = r.data {
+                println!("{:>36} | name", "UUID              ");
+                for ztl_con in ztl_cons {
+                    println!(
+                        "{}   {}",
+                        ztl_con.uuid.as_ref().unwrap(),
+                        ztl_con.name.as_ref().unwrap()
+                    );
+                }
+                println!("");
+            } else {
+                eprintln!("Unknown reply {:?}", r);
+            }
+        }
+        Err(e) => eprintln!("{}", e),
+    }
+}
+
+fn print_connection(ztl_con: &ZatelConnection) {
+    println!("connection UUID: {}", ztl_con.uuid.as_ref().unwrap());
+    println!("connection name: {}", ztl_con.name.as_ref().unwrap());
+    println!("{}", &ztl_con.config);
+}
+
+async fn handle_connection_show(uuid: &str) {
+    let mut connection = ipc_connect().await.unwrap();
+    match ipc_exec(
+        &mut connection,
+        &ZatelIpcMessage::new(ZatelIpcData::QuerySavedConf(uuid.to_string())),
+    )
+    .await
+    {
+        Ok(r) => {
+            if let ZatelIpcData::QuerySavedConfReply(ztl_con) = &r.data {
+                print_connection(&ztl_con);
+                println!("");
+            } else {
+                eprintln!("Unexpected reply {:?}", r);
+            }
+        }
+        Err(e) => eprintln!("{}", e),
+    }
 }

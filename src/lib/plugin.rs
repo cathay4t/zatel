@@ -54,11 +54,12 @@ pub async fn ipc_plugin_exec(
     ipc_recv(&mut stream).await
 }
 
+//TODO: save plugin name in return also, so we know which plugin to blame.
 pub async fn ipc_plugins_exec(
     ipc_msg: &ZatelIpcMessage,
     plugins: &[ZatelPluginInfo],
     capacity: &ZatelPluginCapacity,
-) -> Vec<String> {
+) -> Vec<ZatelIpcMessage> {
     let mut replys_async = Vec::new();
     for plugin_info in plugins {
         if plugin_info.capacities.contains(capacity) {
@@ -67,20 +68,14 @@ pub async fn ipc_plugins_exec(
     }
     let replys = join_all(replys_async).await;
 
-    let mut reply_strs = Vec::new();
+    let mut reply_msgs = Vec::new();
     for reply in replys {
         match reply {
-            Ok(r) => {
-                if let Ok(s) = r.get_data_str() {
-                    reply_strs.push(s.to_string());
-                } else {
-                    eprintln!("WARN: got invalid reply from plugin: {:?}", r);
-                }
-            }
+            Ok(r) => reply_msgs.push(r),
             Err(e) => {
                 eprintln!("WARN: got error from plugin: {:?}", e);
             }
         }
     }
-    reply_strs
+    reply_msgs
 }
